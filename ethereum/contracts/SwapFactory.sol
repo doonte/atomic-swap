@@ -3,7 +3,9 @@ pragma solidity ^0.8.5;
 
 import "./Secp256k1.sol";
 
-contract SwapFactory is Secp256k1 {
+import "@opengsn/contracts/src/ERC2771Recipient.sol";
+
+contract SwapFactory is Secp256k1, ERC2771Recipient {
 
     // Swap state is PENDING when the swap is first created and funded
     // Alice sets Stage to READY when she sees the funds locked on the other chain.
@@ -53,6 +55,10 @@ contract SwapFactory is Secp256k1 {
     event Claimed(bytes32 swapID, bytes32 s);
     event Refunded(bytes32 swapID, bytes32 s);
 
+    constructor(address _forwarder) {
+        _setTrustedForwarder(_forwarder);
+    }
+
     // new_swap creates a new Swap instance with the given parameters.
     // it returns the swap's ID.
     function new_swap(bytes32 _pubKeyClaim, 
@@ -63,7 +69,7 @@ contract SwapFactory is Secp256k1 {
     ) public payable returns (bytes32) {
 
         Swap memory swap;
-        swap.owner = payable(msg.sender); 
+        swap.owner = payable(_msgSender()); 
         swap.claimer = _claimer;
         swap.pubKeyClaim = _pubKeyClaim;
         swap.pubKeyRefund = _pubKeyRefund;
@@ -86,7 +92,7 @@ contract SwapFactory is Secp256k1 {
     function set_ready(Swap memory _swap) public {
         bytes32 swapID = keccak256(abi.encode(_swap));
         require(swaps[swapID] == Stage.PENDING, "swap is not in PENDING state");
-        require(_swap.owner == msg.sender, "only the swap owner can call set_ready");
+        require(_swap.owner == _msgSender(), "only the swap owner can call set_ready");
         swaps[swapID] = Stage.READY;
         emit Ready(swapID);
     }
@@ -97,7 +103,7 @@ contract SwapFactory is Secp256k1 {
         bytes32 swapID = keccak256(abi.encode(_swap));
         Stage swapStage = swaps[swapID];
         require(swapStage != Stage.COMPLETED && swapStage != Stage.INVALID, "swap is already completed");
-        require(msg.sender == _swap.claimer, "only claimer can claim!");
+        require(_msgSender() == _swap.claimer, "only claimer can claim!");
         require((block.timestamp >= _swap.timeout_0 || swapStage == Stage.READY), "too early to claim!");
         require(block.timestamp < _swap.timeout_1, "too late to claim!");
 
@@ -116,7 +122,7 @@ contract SwapFactory is Secp256k1 {
         bytes32 swapID = keccak256(abi.encode(_swap));
         Stage swapStage = swaps[swapID];
         require(swapStage != Stage.COMPLETED && swapStage != Stage.INVALID, "swap is already completed");
-        require(msg.sender == _swap.owner, "refund must be called by the swap owner");
+        require(_msgSender() == _swap.owner, "refund must be called by the swap owner");
         require(
             block.timestamp >= _swap.timeout_1 ||
             (block.timestamp < _swap.timeout_0 && swapStage != Stage.READY),
